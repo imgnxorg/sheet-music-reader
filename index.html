@@ -36,6 +36,9 @@ SPDX-License-Identifier: 0BSD
             referrerpolicy="no-referrer"
             onload=""
         ></script>
+        <script src="./tabbable.js"></script>
+        <script src="./useState.js"></script>
+        <script src="./measureBpm.js"></script>
         <script>
             // ==========================================================================
             // tab-focus.js
@@ -44,10 +47,18 @@ SPDX-License-Identifier: 0BSD
             // Credit: Sam Potts https://gist.github.com/sampotts
             (function () {
                 var className = "tab-focus";
-
                 // Remove class on blur
                 document.addEventListener("focusout", function (event) {
                     event.target.classList.remove(className);
+                    // Delay the adding of classname until the focus has changed
+                    // This event fires before the focusin event
+                    window.setTimeout(function () {
+                        // Debounce the animation.
+                    }, 899);
+                    window.setTimeout(function () {
+                        document.activeElement.classList.add(className);
+                        centerElement(document.activeElement);
+                    }, 0);
                 });
 
                 // Add classname to tabbed elements
@@ -60,62 +71,8 @@ SPDX-License-Identifier: 0BSD
                     // This event fires before the focusin event
                     window.setTimeout(function () {
                         document.activeElement.classList.add(className);
+                        centerElement(document.activeElement);
                     }, 0);
-                });
-            })();
-
-            const useState = (initial) => {
-                const val = [initial];
-                let _type = typeof initial;
-
-                return [
-                    // getter
-                    val[0],
-                    // setter
-                    (next) => {
-                        if (_type === "undefined") {
-                            if (typeof next !== "undefined") {
-                                _type = typeof next;
-                            }
-                        } else if (typeof next !== _type) {
-                            throw new Error(
-                                `Invalid type in setState(). Expected ${_type}; received ${typeof next}.`
-                            );
-                        }
-                        val.unshift(next);
-                        val.pop();
-                    },
-                ];
-            };
-
-            const [activePageIndex, setActivePageIndex] = useState(0);
-
-            const log = (args) => {
-                console.log(`${args}`, args[0] ? [...args] : args);
-            };
-
-            document.addEventListener("DOMContentLoaded", async () => {
-                const contentTags =
-                    document.querySelectorAll("pre > div.content");
-                contentTags[0].focus();
-                const scrollContainer =
-                    document.querySelector("#scroll-container");
-
-                function elementHasPageIndex(el) {
-                    return el.hasAttribute("data-page-index");
-                }
-
-                contentTags.forEach((el, index) => {
-                    console.log("Content tag:", el, index);
-                    if (elementHasPageIndex(el)) {
-                        if (el.tabIndex === 0) {
-                            // TODO: Nothing. It's unreachable.
-                            // It's either -1 or 0. Docs:
-                            // https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/tabindex
-                            console.log("Setting page index:", el, index);
-                            el.dataset.pageIndex = index; // This is how you define it without React...
-                        }
-                    }
                 });
 
                 function centerElement(el) {
@@ -125,172 +82,452 @@ SPDX-License-Identifier: 0BSD
                     });
                 }
 
-                async function tabEventHandler(shiftKey) {
-                    // Create a "Shift+Tab" keyboard event
-                    const opts = {
-                        key: "Tab", // Represents the key pressed
-                        code: "Tab", // Represents the physical key location
-                        keyCode: 9, // Deprecated but still widely used
-                        shiftKey, // Indicates the "Shift" key is held
-                        bubbles: true, // Event propagates up the DOM
-                        cancelable: true, // Allows default behavior to be prevented
+                /** This code defines a custom implementation of the
+                 * `useState` hook in JavaScript. Here's a breakdown of what it does:
+                 *
+                 *  1. **`useState` Function**:
+                 *
+                 *    - Takes an initial state value (`initial`) and sets up a
+                 *        state container (`val`) and a type tracker (`_type`).
+                 *    - Defines a `setState` function to update the state.
+                 *
+                 *    - The `setState` function checks the type of the new state
+                 *        value to ensure it matches the initial type.
+                 *    - Adds the state update to a queue and then flushes the queue
+                 *        using `flushActQueue`.
+                 *
+                 *
+                 *  2. **`flushActQueue` Function**:
+                 *
+                 *    - Ensures that the queue is processed without re-entrance.
+                 *
+                 *    - Iterates through the queue and executes each callback.
+                 *
+                 *    - If an error occurs, it slices the queue to remove processed
+                 *        callbacks and rethrows the error.
+                 *    - Resets the `isFlushing` flag after processing.
+                 *
+                 *
+                 *
+                 *  The `flushActQueue` function ensures that state updates are
+                 *  processed in order and prevents re-entrance issues by
+                 *  using the `isFlushing` flag. The `useState` function provides
+                 *  a way to manage state with type checking and
+                 *  batching of state updates.
+                 *
+                 */
+
+                /**
+                 * Custom implementation of the useState hook.
+                 *
+                 * @param {any} initial - The initial state value.
+                 * @returns {[any, function]} - An array containing the current state value and a function to update the state.
+                 *
+                 * @throws {Error} If the type of the new state value does not match the type of the initial state value.
+                 */
+
+                const useState = (initial) => {
+                    const val = [initial];
+                    let _type = typeof initial;
+                    const queue = [];
+
+                    const setState = (next) => {
+                        console.log("Call to setState", next);
+                        if (_type === "undefined") {
+                            if (typeof next !== "undefined") {
+                                _type = typeof next;
+                            }
+                        } else if (typeof next !== _type) {
+                            throw new Error(
+                                `Invalid type in setState(). Expected ${_type}; received ${typeof next}.`
+                            );
+                        }
+
+                        // Add the state update to the queue
+                        queue.push(() => {
+                            val.unshift(next);
+                            console.log("Updating the queue...", val);
+                            val.pop();
+                            return () => null;
+                        });
+
+                        // Flush the queue
+                        console.log("Flushing the queue...", queue);
+                        flushActQueue(queue);
                     };
 
-                    const shiftTabEvent = new KeyboardEvent("keydown", opts);
-
-                    // Target an element to dispatch the event
-                    const targetElement =
-                        document.activeElement || document.body;
-
-                    console.log(
-                        `Simulating ${shiftKey ? "Shift+" : ""}Tab event`,
-                        opts
-                    );
-
-                    console.log(activePageIndex);
-
-                    // Dispatch the event
-                    targetElement.dispatchEvent(shiftTabEvent);
-                }
-
-                window.onkeypress = async (e) => {
-                    e.stopImmediatePropagation();
-                    e.preventDefault();
-                    e.stopPropagation();
-
-                    console.log("Key Pressed:", e.key);
-
-                    // const activePageIndex = await getActivePageIndex();
-                    let expected;
-                    if (e.shiftKey) {
-                        expected =
-                            (activePageIndex - 1 + contentTags.length) %
-                            contentTags.length;
-                        await setActivePageIndex(expected);
-                    } else {
-                        expected =
-                            (activePageIndex + 1 + contentTags.length) %
-                            contentTags.length;
-                        await setActivePageIndex(expected);
-                    }
-
-                    console.log(
-                        `This should fail because it's called in the same function that tries to set it synchronously. Setting is an asynchronous operation.`,
-                        `expected: ${expected}`,
-                        `received (activePageIndex): ${activePageIndex}`
-                    );
-                    if ([" ", "Enter", "Tab"].includes(e.key)) {
-                        e.preventDefault();
-                        tabEventHandler(e.shiftKey);
-                        centerElement(contentTags[activePageIndex]);
-                    } else {
-                        window.dispatchEvent(e);
-                    }
+                    return [
+                        // getter
+                        val[0],
+                        // setter
+                        setState,
+                    ];
                 };
 
-                const throttledScrollHandler1 = _.throttle((e, target) => {
-                    console.log("Throttled 1");
-                    target.scrollTop = target.scrollTop + e.deltaY * 10;
-                }, 3.33333);
+                var isFlushing = false;
 
-                const throttledScrollHandler2 = _.throttle(
-                    async (e) => {
-                        console.time("throttled2", e.deltaY);
-                        const delta = e.delta > 0 ? 1 : -1;
-                        console.timeLog("throttled2", delta);
-                        setActivePageIndex(
-                            (activePageIndex + delta + contentTags.length) %
-                                contentTags.length
+                function flushActQueue(queue) {
+                    if (!isFlushing) {
+                        // Prevent re-entrance.
+                        isFlushing = true;
+                        var i = 0;
+
+                        try {
+                            for (; i < queue.length; i++) {
+                                var callback = queue[i];
+
+                                do {
+                                    callback = callback(true);
+                                } while (callback !== null);
+                            }
+
+                            queue.length = 0;
+                        } catch (error) {
+                            // If something throws, leave the remaining callbacks on the queue.
+                            queue = queue.slice(i + 1);
+                            throw error;
+                        } finally {
+                            isFlushing = false;
+                        }
+                    }
+                }
+
+                const [activePageIndex, setActivePageIndex] = useState(0);
+                const [momentum, setMomentum] = useState(0);
+                const [bpm, setBpm] = useState(100);
+                const [tabbableElements, setTabbableElements] = useState([]);
+
+                const handleChange = (e) => {
+                    const bpm = e.target.value;
+                    console.log("BPM", bpm);
+                    setBpm(bpm);
+                };
+
+                const log = (args) => {
+                    console.log(`${args}`, args[0] ? [...args] : args);
+                };
+
+                document.addEventListener("DOMContentLoaded", async () => {
+                    if (typeof window !== "undefined") {
+                        chalk = window.chalk;
+                    }
+
+                    const contentTags =
+                        document.querySelectorAll("pre > div.content");
+                    contentTags[0].focus();
+
+                    const scrollContainer =
+                        document.querySelector("#scroll-container");
+
+                    function elementHasPageIndex(el) {
+                        return el.hasAttribute("data-page-index");
+                    }
+
+                    const mouseoverHandler = _.debounce((target) => {
+                        console.log(
+                            target.dataset.pageIndex,
+                            ">=",
+                            activePageIndex
                         );
-                        console.timeEnd("throttled2");
-                    },
-                    500,
-                    { trailing: false }
-                );
+                        if (target.dataset.pageIndex >= activePageIndex) {
+                            target.focus();
+                        }
+                    }, 1000);
 
-                scrollContainer.addEventListener("wheel", async (e) => {
-                    e.preventDefault();
-                    e.stopImmediatePropagation();
-                    e.stopPropagation();
-                    const deltaY = e.deltaY;
+                    const tabbableElements = tabbable();
+                    setTabbableElements(tabbableElements);
 
-                    const target = e.target || contentTags[activePageIndex];
-                    scrollAreaYPadded =
-                        target.clientHeight + target.scrollTop + 5;
+                    contentTags.forEach((el, index) => {
+                        // console.log("Content tag:", el, index);
+                        if (elementHasPageIndex(el)) {
+                            if (el.tabIndex === 0) {
+                                // TODO: Nothing. It's unreachable.
+                                // It's either -1 or 0. Docs:
+                                // https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/tabindex
+                                // console.log("Setting page index:", el, index);
+                                el.dataset.pageIndex = index + 1; // This is how you define it without React...
+                                el.addEventListener("mouseover", (e) =>
+                                    mouseoverHandler(e.target)
+                                );
+                            }
+                        }
+                    });
 
-                    console.log(contentTags, activePageIndex);
-                    console.log(
-                        "Diff:",
-                        contentTags[activePageIndex].scrollHeight -
-                            scrollAreaYPadded
+                    // Future Gist
+
+                    console.log("tabbableElements", tabbableElements);
+
+                    async function tabEventHandler(shiftKey) {
+                        // Create a "Shift+Tab" keyboard event
+                        const opts = {
+                            key: "Tab", // Represents the key pressed
+                            code: "Tab", // Represents the physical key location
+                            keyCode: 9, // Deprecated but still widely used
+                            shiftKey, // Indicates the "Shift" key is held
+                            bubbles: true, // Event propagates up the DOM
+                            cancelable: true, // Allows default behavior to be prevented
+                        };
+
+                        const shiftTabEvent = new KeyboardEvent(
+                            "keydown",
+                            opts
+                        );
+
+                        // Target an element to dispatch the event
+                        const targetElement =
+                            document.activeElement || document.body;
+
+                        console.log(
+                            `Simulating ${shiftKey ? "Shift+" : ""}Tab event`,
+                            opts
+                        );
+
+                        console.log(activePageIndex);
+
+                        // Dispatch the event
+                        targetElement.dispatchEvent(shiftTabEvent);
+                    }
+
+                    window.onkeypress = async (e) => {
+                        // e.stopImmediatePropagation();
+                        // e.preventDefault();
+                        // e.stopPropagation();
+
+                        if (e.shiftKey && e.key === "Shift") {
+                            return 0;
+                        }
+
+                        console.log(
+                            `Pressed: %c${e.key}`,
+                            "color: greenyellow"
+                        );
+                        console.log(e);
+
+                        if (e.key === "b" && !!e.metaKey) {
+                            console.log("Click..");
+                            document.querySelector("#bpm-btn").click();
+                        }
+                        // const activePageIndex = await getActivePageIndex();
+                        let expected;
+                        if ([" ", "Enter", "Tab"].includes(e.key)) {
+                            if (e.shiftKey) {
+                                expected =
+                                    (activePageIndex - 1 + contentTags.length) %
+                                    contentTags.length;
+                                setActivePageIndex(expected);
+                            } else {
+                                expected =
+                                    (activePageIndex + 1 + contentTags.length) %
+                                    contentTags.length;
+                                setActivePageIndex(expected);
+                            }
+
+                            console.log(
+                                `This should fail because it's called in the same function that tries to set it synchronously. Setting is an asynchronous operation.`,
+                                `expected: ${expected}`,
+                                `received (activePageIndex): ${activePageIndex}`
+                            );
+                            e.preventDefault();
+                            tabEventHandler(e.shiftKey);
+                            centerElement(contentTags[activePageIndex]);
+                        }
+                        //  else {
+                        //     window.dispatchEvent(e);
+                        // }
+                    };
+
+                    const scrollYHandler = _.throttle((e, target) => {
+                        // console.log("Throttled 1");
+                        target.scrollTop = target.scrollTop + e.deltaY * 10;
+                    }, 50);
+
+                    const scrollXHandler = _.throttle(
+                        async (e) => {
+                            const directionX = e.deltaY + e.deltaX > 0 ? 1 : -1,
+                                nextPageIndex =
+                                    (activePageIndex +
+                                        directionX +
+                                        contentTags.length) %
+                                    contentTags.length;
+                            console.log(
+                                "Focus in:",
+                                contentTags[nextPageIndex]
+                            );
+
+                            setActivePageIndex(nextPageIndex);
+                        },
+                        1000,
+                        { trailing: false }
                     );
 
-                    if (
-                        contentTags[activePageIndex].scrollHeight >
-                        scrollAreaYPadded
-                    ) {
-                        console.log("Handler 1", e.deltaY);
-                        throttledScrollHandler1(e, target);
-                    } else {
-                        throttledScrollHandler2(e);
-                    }
-                });
+                    (function resetMomentum() {
+                        _.debounce(function resetMomentum() {
+                            console.log("Resetting Momentum...");
+                            setMomentum(0);
+                            resetMomentum();
+                        }, bpm * 300);
+                    })();
 
-                console.log("Added!");
-            });
+                    scrollContainer.addEventListener("wheel", async (e) => {
+                        let override = false;
+                        // e.preventDefault();
+                        // e.stopImmediatePropagation();
+                        // e.stopPropagation();
+                        const deltaY = e.deltaY,
+                            deltaX = e.deltaX,
+                            target = e.target || contentTags[activePageIndex];
+
+                        // console.log("Target:", target);
+                        // console.log("Diff:", target.scrollHeight - scrollableArea);
+                        // console.log("Delta: ( x:", deltaX, ", y:", deltaY, ")");
+                        const delta = deltaX + deltaY;
+                        console.log("Combined Delta: ", delta);
+
+                        setMomentum(momentum + delta);
+                        console.log("Momentum: ", momentum + delta);
+
+                        scrollableArea = target.clientHeight + target.scrollTop;
+
+                        if (
+                            momentum >= scrollableArea ||
+                            delta >= scrollableArea
+                        ) {
+                            override = true;
+                        }
+
+                        if (!!override) {
+                            scrollXHandler(e);
+                        } else if (target.scrollHeight - scrollableArea > 0) {
+                            scrollYHandler(e, target);
+                        } else {
+                            scrollXHandler(e);
+                        }
+                    });
+
+                    // Select the node that will be observed for mutations
+
+                    // Options for the observer (which mutations to observe)
+                    const config = {
+                        attributes: true,
+                        attributeOldValue: true,
+                        childList: true,
+                        subtree: true,
+                        characterData: true,
+                        characterDataOldValue: true,
+                    };
+
+                    // Callback function to execute when mutations are observed
+                    const callback = (mutationList, observer) => {
+                        for (const mutation of mutationList) {
+                            const target = mutation.target;
+                            console.log("Mutation target:", mutation.target);
+                            if (mutation.type === "childList") {
+                                console.log(
+                                    "A child node has been added or removed.",
+                                    mutation
+                                );
+                            } else if (mutation.type === "attributes") {
+                                const index = Number(target.dataset?.pageIndex);
+                                if (!!index) {
+                                    setActivePageIndex(index);
+                                }
+
+                                console.log(
+                                    `The ${mutation.attributeName} attribute was modified on ${mutation.target}`
+                                );
+                            }
+                        }
+                    };
+
+                    // Create an observer instance linked to the callback function
+                    const observer = new MutationObserver(callback);
+
+                    // Start observing the target node for configured mutations
+                    observer.observe(scrollContainer, config);
+
+                    // Later, you can stop observing
+                    // observer.disconnect();
+
+                    document.querySelectorAll(".bpm-input").forEach((input) => {
+                        input.addEventListener("change", handleChange);
+                    });
+
+                    // Maybe needs to be immutable
+                    let oneMinute = 1000 * 60,
+                        inTime = Date.now(0),
+                        sessions = [],
+                        currentSession = [];
+
+                    function measureBpm() {
+                        if (inTime === 0) {
+                            inTime = Date.now();
+                            currentSession.push(inTime);
+                        } else {
+                            const now = Date.now();
+                            currentSession.push(now);
+                        }
+                        const taps = currentSession.length,
+                            outTime = currentSession[taps - 1],
+                            diffInMs = outTime - inTime,
+                            factorial = oneMinute / diffInMs,
+                            bpm = taps * factorial;
+
+                        setTimeout(() => {
+                            const taps = currentSession.length;
+                            const now = Date.now();
+                            if (now - currentSession[taps - 1] > 5000) {
+                                updateBpm(bpm);
+                                sessions.push(bpm);
+                                inTime = Date.now(0);
+                                currentSession.length = 0;
+                                taps.length = 0;
+                            }
+                        }, 5000);
+
+                        return bpm;
+                    }
+
+                    function updateBpm(newBpm) {
+                        document
+                            .querySelectorAll(".bpm-input")
+                            .forEach((input) => {
+                                input.removeEventListener(
+                                    "change",
+                                    handleChange
+                                );
+                                setBpm(newBpm);
+                                input.addEventListener("change", handleChange);
+                            });
+                    }
+
+                    function handleClick() {
+                        const bpm = measureBpm();
+                        setBpm(bpm);
+                        document.getElementById("bpm-monitor").innerText = bpm;
+                    }
+                    document
+                        .querySelector("#bpm-btn")
+                        .addEventListener("click", handleClick);
+                    console.log("Added!");
+                });
+            })();
         </script>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Document</title>
+
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wdth,wght@0,62.5..100,100..900;1,62.5..100,100..900&family=Space+Mono&display=swap"
+            rel="stylesheet"
+        />
         <style>
-            body,
-            #scroll-container {
-                touch-action: none;
-                -webkit-overflow-scrolling: auto;
-                overscroll-behavior: contain !important;
-                overflow: auto;
-                scroll-behavior: smooth;
+            body * {
+                text-rendering: geometricPrecision;
+                font-smooth: antialiased;
+                -webkit-font-smoothing: antialiased;
             }
-            #scroll-container div {
-                background-color: hwb(33 86% 0% / 0.8);
-                overflow-y: auto;
-            }
-            #scroll-container div:nth-child(even) {
-                filter: invert(100%);
-            }
-            #scroll-container div:focus {
-                outline: 10px solid #202020;
-                opacity: 1;
-                will-change: opacity;
-                transition-duration: 500ms;
-            }
-            #scroll-container div:not(:focus) {
-                opacity: 0.5;
-                will-change: opacity;
-                transition-duration: 1000ms;
-            }
-            #scroll-container div:nth-child(even):focus {
-                outline: 10px solid #e0e0e0 !important;
-                opacity: 1;
-            }
-
-            @font-face {
-                font-family: "Hack";
-                src: url("/Users/donaldmoore/Library/Fonts/Hack-Regular.ttf");
-                font-weight: 500;
-                /* font-variation-settings: "wght" 900; */
-            }
-            @font-face {
-                font-family: "Roboto Mono";
-                src: url("/Users/donaldmoore/Library/Fonts/RobotoMono-VariableFont_wght.ttf");
-                font-variation-settings: "wght" 900;
-            }
-            @font-face {
-                font-family: "Meslo";
-                src: url("https://storage.googleapis.com/re_imgnx/meslo/regular.ttf");
-                font-variation-settings: "wght" 900;
-            }
-
             @font-face {
                 font-family: "Adobe Clean";
                 src: url("https://use.typekit.net/af/a9f5e6/000000000000000000017708/27/l?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=i7&v=3")
@@ -301,29 +538,84 @@ SPDX-License-Identifier: 0BSD
                         format("opentype");
                 font-display: swap;
                 font-style: italic;
+                font-weight: 900;
+            }
+
+            .monospace {
+                font-family: "Space Mono", "Fira Code", "Courier New", monospace;
                 font-weight: 700;
+                font-style: normal;
             }
-            .adobe-clean {
-                font-family: "Adobe Clean";
+
+            /* Variable font */
+            .sans-serif {
+                font-family: "Noto Sans", "Adobe Clean", "Helvetica",
+                    "Arial" "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+                font-optical-sizing: auto;
+                font-weight: 700;
+                font-style: normal;
+                font-variation-settings: "wdth" 80;
             }
+
+            .clean {
+                font-family: "Adobe Clean", "Helvetica", "Arial" "Segoe UI",
+                    Ta fhoma, Geneva, Verdana, sans-serif;
+            }
+
+            body,
+            #scroll-container {
+                touch-action: none;
+                -webkit-overflow-scrolling: auto;
+                overscroll-behavior: contain !important;
+                overflow: auto;
+                scroll-behavior: smooth;
+            }
+
+            #scroll-container div {
+                background-color: hwb(33 86% 0% / 0.8);
+                overflow-y: auto;
+                position: relative;
+            }
+
+            #scroll-container div:nth-child(even) {
+                filter: invert(100%);
+            }
+
+            #scroll-container > div:focus-within {
+                outline: 8px solid #202020;
+                opacity: 1;
+                will-change: opacity, shadow;
+                transition-duration: 500ms;
+            }
+
+            #scroll-container > div:not(:focus-within) {
+                opacity: 0.5;
+                will-change: opacity, shadow;
+                transition-duration: 1000ms;
+            }
+
+            #scroll-container > div:nth-child(even):focus-within {
+                outline: 8px solid #efefef !important;
+                opacity: 1;
+            }
+
             html {
                 background: white;
             }
             body {
-                overflow: hidden;
+                overflow: clip;
             }
             body * {
                 scroll-behavior: smooth;
-                font-family: "Meslo" !important;
             }
 
             .debug {
                 outline: 4px solid red;
                 outline-offset: -2px;
             }
-            .debug div:not(:focus) {
+            .debug > div:not(:focus-within) {
                 opacity: 0.5;
-                outline: 4px solid black;
+                outline: 4px solid red;
             }
             .debug * {
                 outline-color: #00ff00;
@@ -334,22 +626,49 @@ SPDX-License-Identifier: 0BSD
                 filter: invert(100%);
             }
         </style>
-        <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+        <script src="https://cdn.tailwindcss.com?plugins=typography,forms,aspect-ratio,container-queries"></script>
     </head>
-    <body class="overflow-x-auto">
+    <body class="overflow-x-clip">
         <pre
             id="scroll-container"
-            class="bg-[linen] font-face px-3 flex flex-col flex-wrap py-4 overflow-x-auto scroll-smooth h-[100vh]"
+            class="bg-[linen] dark:bg-[whitesmoke] dark:invert font-face px-3 flex flex-col flex-wrap py-4 overflow-x-auto scroll-smooth h-[100vh] shadow-[inset_0_0_40px_#201d24] dark:shadow-[inset_0_0_40px_#f0f0f0] gap-20 pl-[12rem]"
         >
-<div tabindex="0" onhover="this.focus()">
-  <form>
-    <button><kbd>BPM</kbd></button>
-    <input type="number" value="" />
-  </form>
-</div>
+        <div tabindex="0"  class="monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-6 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+          <form class="prose gap-y-10 flex flex-col" onsubmit="(e) => {e.persist(); e.preventDefault()}">
+            <div class="flex flex-col gap-y-10 justify-around">
+                <div class="flex flex-col justify-around">
+                  <button
+                  id="bpm-btn"
+                  type="button"
+                  
+                  class="shadow-lg rounded-lg mr-4 bg-white dark:bg-black p-2 bg-white relative w-full border-style-[outset] border-[10px]"
+                  >
+                  <details id="bpm-monitor"></details>
+                    BPM
+                  <kbd class="monospace">⌘+B</kbd>
+                </button>
+              </div>
+              <div class="justify-between debug">
+                
+                <div class="flex flex-col justify-around">
+                  <input class="bpm-input" type="number" value="" />
+                  <input class="bpm-input" type="range" value="" />
+                </div>
+                <div class="flex justify-around">
+                  <button type="button"><kbd>&lt;&lt;</kbd></button>
+                  <button type="button"><kbd>&lt;</kbd></button>
+                  <button type="button"><kbd>🔴</kbd></button>
+                  <button type="button"><kbd>&gt;</kbd></button>
+                  <button type="button"><kbd>&gt;&gt;</kbd></button>
+                </div>
+              </div>
+            </div>
+          </form>
+          
+        </div>
 <!-- prettier-ignore -->
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>1</code>
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg rounded z-10">1</code>
 Moonlight Sonata by Ludwig van Beethoven
 
 Tabulated from the (much easier to play) piano score by David Atkinson
@@ -381,8 +700,8 @@ Please email comments, corrections, suggestions and the rest to David
 
 The roman numerals above the tab indicate either full barres or half barres.  The ...s indicate how long the barre lasts.
 </div>
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>2</code>
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg dark:shadow-[white] rounded z-10">2</code>
 
 (1.) ___ Am, Am/G
 Adagio Sostenuto.
@@ -400,24 +719,24 @@ E|------------------------|-3----------------------|
 
 </div>
 <!-- prettier-ignore -->
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>3</code>
-(2.) ___ F sans5 => Dm ♯5, A(var)
-      I...       III..
-      |     |     |     |      |     |     |     |
-E|------------------------|------------------------|
-B|-----1-----1-----3-----3|-----3-----1-----0-----0|
-G|---2-----2-----3-----3--|---1-----2-----2-----1--|
-D|-3-----3-----3-----3----|-2-----2-----2-----0----| 
-A|-------------5----------|------------------------| 
-E|-1----------------------|-0-----------0----------|
-   3 2 1       1            2 1 4 2 3 1         1
-   1           3
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg dark:shadow-[white] rounded z-10">3</code>
+(2.) ___ F sans5 => Dm ♯5, A(var)                    
+      I...       III..                                
+      |     |     |     |      |     |     |     |    
+E|------------------------|------------------------|   
+B|-----1-----1-----3-----3|-----3-----1-----0-----0|   
+G|---2-----2-----3-----3--|---1-----2-----2-----1--|   
+D|-3-----3-----3-----3----|-2-----2-----2-----0----|   
+A|-------------5----------|------------------------|   
+E|-1----------------------|-0-----------0----------|   
+   3 2 1       1            2 1 4 2 3 1         1     
+   1           3                                      
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   
 
 (3.) ___ Am, E(var)
-   II
-      |     |     |     |        |     |     |     |
+  II
+    |     |     |     |        |     |     |     |
 E|-------------------0----0|--0-----------------0----0|
 B|-----------1-----1-----1-|------3-----3-----3-----3-|
 G|-2---2---2-----2-----2---|----4-----4-----4-----4---|
@@ -426,12 +745,13 @@ A|-0-----------------------|--------------------------|
 E|-------------------------|--0-----------------------|
    3         1                  3 2 1
    2
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 
 </div>
 <!-- prettier-ignore -->
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>4</code>
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg dark:shadow-[white] rounded z-10">4</code>
 (4.) ___ Am => D(/F), Am7/G => G7(var)
          |     |     |      |     |     |     |
 E|-0-----------1----------|-0-----------------3----|
@@ -461,8 +781,8 @@ E|------------------------|-8------------------------|
    
 </div>
 <!-- prettier-ignore -->
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>5</code>
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg dark:shadow-[white] rounded z-10">5</code>
 (6.) ___ A♯m add6 5♭♭, G♯ => F♯dim7
    IV.....................................I.....
       |     |     |     |       |     |     |     |
@@ -493,8 +813,8 @@ E|-3----------------------|------------------------|
 
 </div>
 <!-- prettier-ignore -->
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>6</code>
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg dark:shadow-[white] rounded z-10">6</code>
 (8.) ___ Gm => Gmaj, Cm => Cm add4
    III.......................IV....III..IV....II
       |     |     |     |      |     |     |     |
@@ -520,8 +840,8 @@ E|-3=============================------------------|
 
 </div>
 <!-- prettier-ignore -->
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>7</code>
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg dark:shadow-[white] rounded z-10">7</code>
 (10.) ___ Gmaj => Gdim, Dmaj (X 5 4 2 3 2)
 (note: the 2 on the B string was a 6 on the G)
 (2nd half of 1st bar)
@@ -555,8 +875,8 @@ E|-3-----------4----------|-5-----5-----5-----5----|
 
 </div>
 <!-- prettier-ignore -->
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>8</code>
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg dark:shadow-[white] rounded z-10">8</code>
 (12.) ___ Dm, A7 omit3
       VII.........     1/2 V..........            V....
       |     |     |     |       |     |     |     |
@@ -586,8 +906,8 @@ E|-------------7-----5----|-4-----------------4----|
 
 </div>
 <!-- prettier-ignore -->
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>9</code>
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg dark:shadow-[white] rounded z-10">9</code>
 (14.) ___ Am => G#/D dim => D♯ dim7, Emaj(var)
                   decresc       p  &lt;       &gt;
                      V..... IV.............
@@ -617,8 +937,8 @@ E|-0----------------------|-0----------------------|
    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 </div>
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>10</code>
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg dark:shadow-[white] rounded z-10">10</code>
 (16.) ___ E sus4 5♯, E79♭(var)
          &lt;            &gt;
       |     |     |     |      |     |     |     |
@@ -645,8 +965,8 @@ E|-0----------------------|-0----------------------|
 
 </div>
 <!-- prettier-ignore -->
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>11</code>
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg dark:shadow-[white] rounded z-10">11</code>
 (18.) ___ E5 9♭11♭(var), E79♭(var)
                                  decresc
       |     |     |     |      |     |     |     |
@@ -672,8 +992,8 @@ E|---4---1-4--------------|-4----------------------|
 
 </div>
 <!-- prettier-ignore -->
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>12</code>
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg dark:shadow-[white] rounded z-10">12</code>
 (20.) ___ E7/G#(var) 
                                  decresc
       |     |     |     |      |     |     |     |
@@ -698,8 +1018,8 @@ E|-------------0----------|-------------------------|
 
 </div>
 <!-- prettier-ignore -->
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>13</code>
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg dark:shadow-[white] rounded z-10">13</code>
 (22.) ___ E7omit3, Am
       2 4 3       2 3 1        3 2       1
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -723,8 +1043,8 @@ E|-3-----------3----------|-------------------------|
    
 </div>
 <!-- prettier-ignore -->
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>14</code>
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg dark:shadow-[white] rounded z-10">14</code>
 (24.) ___ G7/B, C
                               3 2 3 2 3 4       1
                               1                 2
@@ -753,8 +1073,8 @@ E|-4----------------------|-------------0----------|
    
 </div>
 <!-- prettier-ignore -->
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>15</code>
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg dark:shadow-[white] rounded z-10">15</code>
 (26.) ___ Am, Dm
       4 3         1 2 4        4 1 4       4 3
       1           3            1           1
@@ -785,8 +1105,8 @@ E|------------------------|------------------------|
    
 </div>
 <!-- prettier-ignore -->
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>16</code>
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg dark:shadow-[white] rounded z-10">16</code>
 (28.) ___ A, G7/B
    V......................
       |     |     |     |      |     |     |     |
@@ -813,8 +1133,8 @@ E|-------------4----------|-1-----------0----------|
    
 </div>
 <!-- prettier-ignore -->
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>17</code>
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg dark:shadow-[white] rounded z-10">17</code>
 (30.) ___ Am/E => E7, Am
       1 1   1   4 2 1 4 2 3 1  4 3         2 3  1  3
       3     3     3            1
@@ -840,8 +1160,8 @@ E|--4-----------------0----0|-5------------------0----0|
    
 </div>
 <!-- prettier-ignore -->
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>18</code>
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg dark:shadow-[white] rounded z-10">18</code>
 (32.) ___ Fdim, Am
       1 4 2                     3 1 4 1 1 1 1 4 1  4 1 3
       3                         1
@@ -870,8 +1190,8 @@ E|-0------------------0----0|-5-----------5----------|
    
 </div>
 <!-- prettier-ignore -->
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>19</code>
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg dark:shadow-[white] rounded z-10">19</code>
 (34.) ___ Am
    4 3 4 1 4 3 4 2 1 1
    3
@@ -899,8 +1219,8 @@ E|-------------------------|
    
 </div>
 <!-- prettier-ignore -->
-<div tabindex="0" onhover="this.focus()" class="content w-[50vw] h-full flex flex-col items-center justify-start prose m-6 p-6 whitespace-pre-wrap">
-  <code>20</code>
+<div tabindex="0" class="relative z-0 monospace content overflow-visible flex-shrink h-full flex flex-col items-start justify-start min-w-prose prose my-8 p-8 whitespace-pre shadow-[0_0px_160px_-15px_#20202080] rounded" data-page-index="">
+  <code class="sans-serif p-2 text-4xl absolute top-0 right-0 shadow-lg dark:shadow-[white] rounded z-10">20</code>
 (36.) ___ A(note)
    
 ***********************************
