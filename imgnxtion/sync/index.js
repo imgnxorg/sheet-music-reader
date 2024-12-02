@@ -1,46 +1,3 @@
-/** This code defines a custom implementation of the
- * `useState` hook in JavaScript. Here's a breakdown of what it does:
- *
- *  1. **`useState` Function**:
- *
- *    - Takes an initial state value (`initial`) and sets up a
- *        state container (`val`) and a type tracker (`_type`).
- *    - Defines a `setState` function to update the state.
- *
- *    - The `setState` function checks the type of the new state
- *        value to ensure it matches the initial type.
- *    - Adds the state update to a queue and then flushes the queue
- *        using `flushActQueue`.
- *
- *
- *  2. **`flushActQueue` Function**:
- *
- *    - Ensures that the queue is processed without re-entrance.
- *
- *    - Iterates through the queue and executes each callback.
- *
- *    - If an error occurs, it slices the queue to remove processed
- *        callbacks and rethrows the error.
- *    - Resets the `isFlushing` flag after processing.
- *
- *
- *
- *  The `flushActQueue` function ensures that state updates are
- *  processed in order and prevents re-entrance issues by
- *  using the `isFlushing` flag. The `useState` function provides
- *  a way to manage state with type checking and
- *  batching of state updates.
- *
- */
-
-/**
- * Custom implementation of the useState hook.
- *
- * @param {any} initial - The initial state value.
- *
- * @throws {Error} If the type of the new state value does not match the type of the initial state value.
- */
-
 const useState = (initial) => {
     let state = initial; // Immutable state
     const listeners = new Set(); // List of subscribers
@@ -71,21 +28,16 @@ const useState = (initial) => {
             }
         }
 
-        try {
-            // Update state immutably
-            if (newState !== state) {
-                state = newState;
+        // Update state immutably
+        if (newState !== state) {
+            state = newState;
 
-                // Notify listeners of the new state
-                listeners.forEach((listener) => listener(state));
-            }
-        } catch (error) {
-            console.error("Error updating state:", error);
-            throw error;
-        } finally {
-            // Mark flush as complete
-            isFlushing = false;
+            // Notify listeners of the new state
+            listeners.forEach((listener) => listener(state));
         }
+
+        // Mark flush as complete
+        isFlushing = false;
     };
 
     const subscribe = (listener) => {
